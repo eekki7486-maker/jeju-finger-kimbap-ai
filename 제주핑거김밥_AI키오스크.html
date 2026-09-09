@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>제주핑거김밥 REAL FACE AI KIOSK v2</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f6f8;color:#151515;font-family:Arial,"Noto Sans KR",sans-serif}
+.app{max-width:1200px;margin:auto;background:#fff;min-height:100vh}.top{padding:22px 28px;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center}
+.logo{font-size:30px;font-weight:900}.sub{font-size:13px;color:#777;margin-top:5px}.status{padding:9px 13px;border-radius:20px;background:#eee;font-weight:700;font-size:13px}
+main{padding:26px}.hero{background:#fafafa;border:1px solid #ddd;border-radius:18px;padding:25px}
+h1{margin:0 0 8px;font-size:31px}.desc{color:#666;margin-bottom:22px}
+.buttons{display:flex;gap:12px;flex-wrap:wrap}.btn{border:0;border-radius:13px;padding:15px 22px;font-size:17px;font-weight:800;cursor:pointer}.primary{background:#111;color:#fff}.secondary{background:#eee}.danger{background:#ddd}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.cameraBox{margin-top:22px;background:#111;border-radius:18px;overflow:hidden;position:relative;min-height:390px;display:flex;align-items:center;justify-content:center}
+video{width:100%;max-height:650px;object-fit:cover;display:none;transform:scaleX(-1)}canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.placeholder{color:#aaa;text-align:center;padding:40px}.big{font-size:54px}.state{position:absolute;left:16px;top:16px;background:rgba(0,0,0,.72);color:#fff;padding:9px 12px;border-radius:10px;font-size:13px;z-index:5}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:20px}.panel{border:1px solid #ddd;border-radius:16px;padding:20px}.panel h2{margin-top:0}
+.face{padding:12px;border-radius:12px;background:#f6f6f6;margin:9px 0}.metric{font-size:13px;color:#666}
+.menu{border:1px solid #ddd;border-radius:14px;padding:14px;margin:10px 0;display:flex;justify-content:space-between;align-items:center}.menu strong{font-size:17px}.price{color:#666;margin-top:4px}.add{padding:10px 14px;border:0;border-radius:10px;font-weight:800;cursor:pointer}
+.cart{font-size:16px;line-height:1.8}.total{font-size:24px;font-weight:900;border-top:1px solid #ddd;margin-top:12px;padding-top:12px}
+.notice{margin-top:15px;padding:13px;border-radius:11px;background:#fff7d6;color:#5f5000;line-height:1.5;display:none}
+@media(max-width:760px){.grid{grid-template-columns:1fr}main{padding:15px}.top{padding:17px}.cameraBox{min-height:300px}h1{font-size:25px}}
+</style>
+</head>
+<body>
+<div class="app">
+<header class="top">
+<div><div class="logo">제주핑거김밥</div><div class="sub">REAL FACE AI KIOSK v2 · 제주</div></div>
+<div id="status" class="status">준비 중</div>
+</header>
+<main>
+<section class="hero">
+<h1>AI가 추천하는 메뉴를 찾아볼까요?</h1>
+<div class="desc">카메라로 얼굴 특징점을 측정하고, 측정 가능한 값만 이용해 기술 검증용 데모 추천을 실행합니다.</div>
+<div class="buttons">
+<button id="startBtn" class="btn primary">📷 AI 카메라 시작</button>
+<button id="scanBtn" class="btn secondary" disabled>🔎 3초 AI 분석 시작</button>
+<button id="demoBtn" class="btn secondary">⚡ 카메라 없이 데모</button>
+<button id="stopBtn" class="btn danger" disabled>■ 카메라 종료</button>
+</div>
+<div id="notice" class="notice"></div>
+<div class="cameraBox">
+<div id="state" class="state">카메라 대기 중</div>
+<video id="video" autoplay playsinline muted></video><canvas id="canvas"></canvas>
+<div id="placeholder" class="placeholder"><div class="big">📷</div><div>AI 카메라 시작 버튼을 눌러주세요.</div></div>
+</div>
+</section>
+<div class="grid">
+<section class="panel"><h2>실시간 얼굴 분석</h2><div id="faces"><div class="metric">아직 얼굴을 분석하지 않았습니다.</div></div></section>
+<section class="panel"><h2>AI 추천 결과</h2><div id="recommend"><div class="metric">분석 후 추천 메뉴가 표시됩니다.</div></div></section>
+</div>
+<div class="grid">
+<section class="panel"><h2>주문</h2><div id="cart" class="cart">담긴 메뉴가 없습니다.</div><div id="total" class="total">0원</div>
+<button id="orderBtn" class="btn primary" style="width:100%;margin-top:12px">주문하기</button></section>
+<section class="panel"><h2>현재 적용 데이터</h2><div class="metric">① 얼굴 랜드마크 측정값<br>② 감지된 얼굴 수<br>③ 메뉴 DB<br><br><b>※ 현재 추천은 기술 검증용 데모입니다.</b><br>성별·나이·성격·건강상태·관상 판단은 하지 않습니다.</div></section>
+</div>
+</main></div>
+<script type="module">
+import {FaceLandmarker,FilesetResolver,DrawingUtils} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm";
+const $=id=>document.getElementById(id);const video=$("video"),canvas=$("canvas"),ctx=canvas.getContext("2d");
+let landmarker=null,stream=null,running=false,raf=0,lastVideoTime=-1,facesData=[],cart=[];
+const menus=[
+{name:"흑돼지 돈까스 핑김",price:6000},{name:"갈치 3종 세트 핑김",price:12000},
+{name:"흑돼지 3종 세트 핑김",price:8000},{name:"갈치조림 핑김",price:10000},
+{name:"갈치구이 핑김",price:10000},{name:"갈치튀김 핑김",price:10000}];
+function status(t){$("status").textContent=t}function state(t){$("state").textContent=t}
+function notice(t){$("notice").style.display=t?"block":"none";$("notice").innerHTML=t||""}
+async function initAI(){
+ if(landmarker)return true;status("AI 엔진 로딩");state("AI 엔진 로딩 중…");
+ try{
+ const vision=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm");
+ landmarker=await FaceLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",delegate:"GPU"},runningMode:"VIDEO",numFaces:4,minFaceDetectionConfidence:.5,minFacePresenceConfidence:.5,minTrackingConfidence:.5,outputFaceBlendshapes:true,outputFacialTransformationMatrixes:true});
+ status("AI 준비 완료");state("카메라를 시작할 수 있습니다.");return true;
+ }catch(e){console.error(e);status("AI 로딩 실패");state("AI 엔진 로딩 실패");notice("AI 엔진을 불러오지 못했습니다.<br><b>인터넷 연결</b>을 확인한 뒤 새로고침해 주세요.<br>오류: "+(e.message||e));return false}
+}
+async function startCamera(){
+ notice("");$("startBtn").disabled=true;const ok=await initAI();if(!ok){$("startBtn").disabled=false;return}
+ try{
+ if(!navigator.mediaDevices?.getUserMedia)throw new Error("이 브라우저에서 카메라 API를 사용할 수 없습니다. localhost 또는 HTTPS에서 실행해 주세요.");
+ stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:1280},height:{ideal:720}},audio:false});
+ video.srcObject=stream;await video.play();video.style.display="block";$("placeholder").style.display="none";
+ $("scanBtn").disabled=false;$("stopBtn").disabled=false;running=true;status("카메라 작동 중");state("얼굴을 화면 안에 맞춰주세요.");resize();loop();
+ }catch(e){console.error(e);$("startBtn").disabled=false;status("카메라 시작 실패");state("카메라를 시작할 수 없습니다.");notice("카메라가 시작되지 않았습니다.<br><b>카메라 권한을 허용해 주세요.</b><br>브라우저 정책상 파일을 직접 여는 방식(file://)에서는 카메라가 차단될 수 있습니다. 이 경우 Chrome/Edge에서 열어 주세요.<br><br>오류: "+(e.message||e))}
+}
+function stopCamera(){running=false;cancelAnimationFrame(raf);if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;video.style.display="none";$("placeholder").style.display="block";$("scanBtn").disabled=true;$("stopBtn").disabled=true;$("startBtn").disabled=false;ctx.clearRect(0,0,canvas.width,canvas.height);status("카메라 종료");state("카메라 대기 중")}
+function resize(){if(!video.videoWidth)return;canvas.width=video.videoWidth;canvas.height=video.videoHeight}
+function loop(){if(!running)return;resize();if(video.currentTime!==lastVideoTime&&landmarker){lastVideoTime=video.currentTime;try{const r=landmarker.detectForVideo(video,performance.now());draw(r);extract(r)}catch(e){console.error(e)}}raf=requestAnimationFrame(loop)}
+function draw(r){ctx.clearRect(0,0,canvas.width,canvas.height);const du=new DrawingUtils(ctx);for(const lm of(r.faceLandmarks||[])){du.drawConnectors(lm,FaceLandmarker.FACE_LANDMARKS_TESSELATION,{lineWidth:1});du.drawConnectors(lm,FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,{lineWidth:2})}}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function extract(r){facesData=(r.faceLandmarks||[]).map((lm,i)=>{const width=dist(lm[234],lm[454]),height=dist(lm[10],lm[152]);return{i:i+1,ratio:width/Math.max(height,.0001),eye:dist(lm[159],lm[145]),mouth:dist(lm[13],lm[14])}});
+$("faces").innerHTML=facesData.length?facesData.map(f=>`<div class="face"><b>사람 ${f.i}</b><br><span class="metric">얼굴 폭/높이 ${f.ratio.toFixed(3)} · 눈 개방 ${f.eye.toFixed(3)} · 입 개방 ${f.mouth.toFixed(3)}</span></div>`).join(""):"<div class='metric'>얼굴을 찾는 중… 화면 중앙을 바라봐 주세요.</div>";
+if(facesData.length)state("얼굴 "+facesData.length+"명 감지")}
+$("startBtn").onclick=startCamera;$("stopBtn").onclick=stopCamera;
+$("scanBtn").onclick=()=>{if(!running){notice("먼저 AI 카메라를 시작해 주세요.");return}$("scanBtn").disabled=true;status("3초 AI 분석 중");state("3초 동안 얼굴 특징을 측정합니다…");let n=3;$("scanBtn").textContent="⏱ 분석 중 "+n+"초";const iv=setInterval(()=>{$("scanBtn").textContent="⏱ 분석 중 "+(--n)+"초";},1000);setTimeout(()=>{clearInterval(iv);$("scanBtn").disabled=false;$("scanBtn").textContent="🔎 3초 AI 분석 시작";status("분석 완료");state("AI 추천 계산 완료");recommend(facesData)},3000)}
+$("demoBtn").onclick=()=>{status("데모 분석");state("카메라 없는 데모");facesData=[{i:1,ratio:.76,eye:.08,mouth:.04},{i:2,ratio:.82,eye:.09,mouth:.05},{i:3,ratio:.79,eye:.07,mouth:.03}];$("faces").innerHTML=facesData.map(f=>`<div class="face"><b>사람 ${f.i}</b><br><span class="metric">데모 폭/높이 ${f.ratio.toFixed(3)}</span></div>`).join("");recommend(facesData)}
+function recommend(fs){
+const n=fs.length||1,avg=fs.length?fs.reduce((s,f)=>s+f.ratio,0)/fs.length:.79;
+let list;if(n>=3)list=[menus[2],menus[1],menus[0]];else if(avg<.78)list=[menus[0],menus[1],menus[2]];else list=[menus[1],menus[0],menus[3]];
+$("recommend").innerHTML=list.map((m,i)=>`<div class="menu"><div><strong>${i+1}위 · ${m.name}</strong><div class="price">${m.price.toLocaleString()}원</div></div><button class="add" data-name="${m.name}">주문담기</button></div>`).join("");
+document.querySelectorAll(".add").forEach(b=>b.onclick=()=>add(b.dataset.name));
+}
+function add(name){const m=menus.find(x=>x.name===name);if(!m)return;cart.push(m);renderCart()}
+function renderCart(){if(!cart.length){$("cart").textContent="담긴 메뉴가 없습니다.";$("total").textContent="0원";return}$("cart").innerHTML=cart.map((m,i)=>`${i+1}. ${m.name} — ${m.price.toLocaleString()}원`).join("<br>");$("total").textContent=cart.reduce((s,m)=>s+m.price,0).toLocaleString()+"원"}
+$("orderBtn").onclick=()=>alert(cart.length?"주문 테스트 완료: "+cart.length+"개 메뉴":"먼저 메뉴를 주문담아 주세요.");
+status("준비 완료");state("카메라 대기 중");
+</script>
+</body></html>
